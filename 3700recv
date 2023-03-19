@@ -19,19 +19,14 @@ class Receiver:
 		sys.stderr.write(message + "\n")
 		sys.stderr.flush()
 
-	def send_next_ack(self, window, seq_num):
-		for msg in window:
-			if msg['seq_num'] == seq_num:
-				# Print out the data to stdout
-				print(msg["data"], end='', flush=True)
+	def send_next_ack(self, msg):
+		# Print out the data to stdout
+		print(msg["data"], end='', flush=True)
 
-				# Always send back an ack
-				self.send({ "type": "ack", "seq_num": seq_num })
-				self.log("Sending ack '%s'" % seq_num)
+		# Always send back an ack
+		self.send({ "type": "ack", "seq_num": msg["seq_num"] })
+		self.log("Sending ack '%s'" % msg["seq_num"])
 				
-				window.remove(msg)
-				return True
-		return False
 
 	def run(self):
 		seq_num = 0
@@ -51,7 +46,7 @@ class Receiver:
 					msg = json.loads(data.decode('utf-8'))
 				except json.decoder.JSONDecodeError:
 					break
-
+				
 				if not all(key in msg for key in ["type", "data", "seq_num", "timestamp", "retransmitted", "checksum"]):
 					break
 
@@ -59,16 +54,18 @@ class Receiver:
 					break							 
 				
 				self.log("Received data message %s" % msg)
-				if msg["retransmitted"]:
+				if msg["retransmitted"] and msg["seq_num"] < seq_num:
 					self.send({ "type": "ack", "seq_num": msg["seq_num"] })
 					self.log("Sending ack '%s' from retransmission" % msg["seq_num"])
 					
 				window.append(msg)
-				while(True):
-					if self.send_next_ack(window, seq_num):
+				window.sort(key = lambda msg: msg["seq_num"])
+				for msg in window:
+					if msg["seq_num"] == seq_num:
 						seq_num += 1
-					else:
-						break
+						self.send_next_ack(msg)
+						window.remove(msg)
+					
 		return
 
 if __name__ == "__main__":
