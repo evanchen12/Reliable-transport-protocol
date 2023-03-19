@@ -68,7 +68,6 @@ class Sender:
 								received_ack = [ack for ack in received_ack if ack != msg["seq_num"]]
 								# retransmit
 								sent_msg = sent_msgs[msg["seq_num"]]
-								sent_msg["timestamp"] = now
 								sent_msg["retransmitted"] = True
 								for sent_msg in sent_msgs.values():
 									sent_msg["timestamp"] = time.monotonic()
