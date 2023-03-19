@@ -25,11 +25,12 @@ class Sender:
 		seq_num = 0 # next sequence number to send out
 		sent_msgs = {}
 		next_seq_num = 0 # next sequence number that should be acked
-		rec_ack_this_loop = False
 		rtt = 0.5
+		alpha = 0.8
 		window_size = 1.0
 		ssthresh = 4
 		received_ack = []
+		first_retransmit = 0
 		
 		while True:
 			sockets = [self.socket, sys.stdin] if not self.waiting else [self.socket]
@@ -38,67 +39,81 @@ class Sender:
 				if conn == self.socket:
 					k, addr = conn.recvfrom(65535)
 					now = time.monotonic()
+					
 					try: # Check if JSON corrupted
 						msg = json.loads(k.decode('utf-8'))
 					except json.decoder.JSONDecodeError:
 						break
 
-					received_ack.append(msg["seq_num"])
+					
 					if msg["seq_num"] in sent_msgs:
-						rtt = now - sent_msgs[msg["seq_num"]]["timestamp"]
+						received_ack.append(msg["seq_num"])
 
-						if msg["seq_num"] == next_seq_num:
+						#update rtt estimation
+						new_rtt = now - sent_msgs[msg["seq_num"]]["timestamp"]
+						rtt = alpha * rtt + (1 - alpha) * new_rtt
+
+						# delete sent msg for seen ack
+						del sent_msgs[msg["seq_num"]]
+
+						if msg["seq_num"] >= next_seq_num:
+							# Slowstart/congestion avoidance
 							if window_size < ssthresh:
 								window_size += 1.0
 							else:
 								window_size += 1.0 / window_size
-							del sent_msgs[msg["seq_num"]]
-							next_seq_num += 1
-							rec_ack_this_loop = True
 						else:
+							# Reno fast retransmit
 							if received_ack.count(msg["seq_num"]) >= 3:
 								received_ack = [ack for ack in received_ack if ack != msg["seq_num"]]
 								# retransmit
 								sent_msg = sent_msgs[msg["seq_num"]]
 								sent_msg["timestamp"] = now
 								sent_msg["retransmitted"] = True
+								for sent_msg in sent_msgs.values():
+									sent_msg["timestamp"] = time.monotonic()
 								self.send(sent_msg)
-								window_size = window_size / 2
+								window_size = window_size / 2.0
+								
+						next_seq_num += 1
+						first_retransmit = seq_num
 						
 					self.log("Received message '%s'" % msg)
-
-					
-					if len(sent_msgs) == 0:
-						self.waiting = False
+					self.waiting = False
+						
 				elif conn == sys.stdin and self.waiting == False:
-					for i in range(0, int(window_size)):
-						data = sys.stdin.read(DATA_SIZE)
-						if len(data) == 0 and len(sent_msgs) == 0:
+					data = sys.stdin.read(DATA_SIZE)
+					if len(data) == 0:
+						if len(sent_msgs) == 0:
 							self.log("All done!")
 							sys.exit(0)
+					else:
 
 						msg = { "type": "msg", "data": data, "seq_num": seq_num, "timestamp": time.monotonic(), "retransmitted": False, "checksum": zlib.crc32(data.encode('utf-8'))}
 						sent_msgs[seq_num] = msg
 						self.log("Sending message '%s'" % msg)
 						self.send(msg)
 						seq_num += 1
-					self.waiting = True
+						if seq_num - next_seq_num >= window_size:
+							self.waiting = True
 					
-			#check all sent messages for timestamps and retransmit
-			if not rec_ack_this_loop:
-				for sent_msg in sent_msgs.values():
-					cur_time = time.monotonic()
-					if (cur_time - sent_msg["timestamp"]) > 2.0 * rtt and sent_msg["seq_num"] == next_seq_num:
-						sent_msg["timestamp"] = cur_time
-						sent_msg["retransmitted"] = True
-						self.log("Sending message '%s' AGAIN" % sent_msg)
-						self.send(sent_msg)
+			# check all sent messages for timestamps and retransmit
+			for sent_msg in sent_msgs.values():
+				cur_time = time.monotonic()
+				if sent_msg["seq_num"] > first_retransmit:
+					sent_msg["timestamp"] = cur_time
+					continue
+				if (cur_time - sent_msg["timestamp"]) > 2.0 * rtt:
+					first_retransmit = sent_msg["seq_num"]
+					sent_msg["retransmitted"] = True
+					
+					self.log("Sending message '%s' AGAIN" % sent_msg)
+					self.send(sent_msg)
+					sent_msg["timestamp"] = cur_time
 
-						ssthresh = window_size / 2.0
-						window_size = 1.0
-						
-						break
-			rec_ack_this_loop = False
+					# Return to slow start
+					ssthresh = window_size / 2.0
+					window_size = 1.0
 		return
 
 if __name__ == "__main__":
