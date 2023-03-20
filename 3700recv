@@ -1,6 +1,6 @@
 #!/usr/bin/env -S python3 -u
 
-import argparse, socket, time, json, select, struct, sys, math, hashlib
+import argparse, socket, time, json, select, struct, sys, math, zlib
 
 class Receiver:
 	def __init__(self):
@@ -53,7 +53,7 @@ class Receiver:
 					break
 
 				# check if checksum is corrupted
-				if hashlib.md5(msg["data"].encode('utf-8')).hexdigest() != msg["checksum"]:
+				if zlib.crc32(msg["data"].encode('utf-8')) != msg["checksum"]:
 					break							 
 				
 				self.log("Received data message %s" % msg)
