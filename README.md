@@ -20,7 +20,5 @@ For this project we follow the suggested implementation strategy from the assign
 - For level 4 the program was timing out due to excessive retransmission
 - The program was often too slow, resulting in time exceeded 
 
-# Design and features --- 
-
 # Testing --- 
 For testing, we use the test file in the configs folder. We would run the implementation with the relevant configs test after each step.  
