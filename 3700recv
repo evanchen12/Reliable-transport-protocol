@@ -1,6 +1,6 @@
 #!/usr/bin/env -S python3 -u
 
-import argparse, socket, time, json, select, struct, sys, math, zlib
+import argparse, socket, time, json, select, struct, sys, math, hashlib
 
 class Receiver:
 	def __init__(self):
@@ -42,21 +42,27 @@ class Receiver:
 					self.remote_host = addr[0]
 					self.remote_port = addr[1]
 
-				try: # Check if JSON corrupted
+				# Check if JSON corrupted
+				try: 
 					msg = json.loads(data.decode('utf-8'))
 				except json.decoder.JSONDecodeError:
 					break
-				
-				if not all(key in msg for key in ["type", "data", "seq_num", "timestamp", "retransmitted", "checksum"]):
+
+				# check if keys are corrupted
+				if not all(key in msg for key in ["type", "data", "seq_num", "retransmitted", "checksum"]):
 					break
 
-				if zlib.crc32(msg["data"].encode('utf-8')) != msg["checksum"]:
+				# check if checksum is corrupted
+				if hashlib.md5(msg["data"].encode('utf-8')).hexdigest() != msg["checksum"]:
 					break							 
 				
 				self.log("Received data message %s" % msg)
-				if msg["retransmitted"] and msg["seq_num"] < seq_num:
-					self.send({ "type": "ack", "seq_num": msg["seq_num"] })
-					self.log("Sending ack '%s' from retransmission" % msg["seq_num"])
+				if msg["seq_num"] < seq_num:
+					if msg["retransmitted"]:
+						self.send({ "type": "ack", "seq_num": msg["seq_num"] })
+						self.log("Sending ack '%s' from retransmission" % msg["seq_num"])
+					
+					
 					
 				window.append(msg)
 				window.sort(key = lambda msg: msg["seq_num"])
