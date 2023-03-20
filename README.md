@@ -10,7 +10,7 @@ For this project we follow the suggested implementation strategy from the assign
 -In level 5, we made sure that the program will drop a packet if 
   1) Json had trouble loading or invalid
   2) The fields are incorrect 
-  3) The compression of the data is inconsistent after sending by implementing a checksum field. This field stores encoded data using zlib.
+  3) The compression of the data is inconsistent after sending by implementing a checksum field. This field stores encoded data using hashlib.
 - In level 6, we changed the retransmission timeout from 1 second to 2 x RTT. The estimated RTT equals the time of the most recently received ACK subtracted by the         corresponding packet’s sent time. If retransmission have to be done, the sender return to slow start.
 - In level 7, for a faster program we implemented RENO fast retransmit. When the sender side receives a ack it will store its sequence number in an received_ack array.
   It'll then check if receiver send this ack's sequence number appeared 3 or more time in the array. 
