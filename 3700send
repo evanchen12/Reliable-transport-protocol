@@ -57,6 +57,7 @@ class Sender:
 						del sent_msgs[msg["seq_num"]]
 
 						if msg["seq_num"] >= next_seq_num:
+							
 							# Slowstart/congestion avoidance
 							if window_size < ssthresh:
 								window_size += 1.0
