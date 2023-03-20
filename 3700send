@@ -27,7 +27,7 @@ class Sender:
 		next_seq_num = 0 # next sequence number that should be acked
 		rtt = 0.5
 		alpha = 0.8
-		window_size = 1.0
+		window_size = 2.0 # start at 2 just to be slightly faster
 		ssthresh = 4
 		received_ack = []
 		first_retransmit = 0
@@ -119,7 +119,7 @@ class Sender:
 					self.send(sent_msg["msg"])
 					sent_msg["timestamp"] = cur_time
 
-					# Return to slow start
+					# greed and have it start window size at half the current point
 					ssthresh = window_size / 2.0
 					window_size = ssthresh
 		return
