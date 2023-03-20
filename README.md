@@ -6,7 +6,7 @@ For this project we follow the suggested implementation strategy from the assign
 - In level 1, we have a window of 2 by using a loop of 2 range. This will send 2 packet at a time.
 - In level 2, we added the sequence number to the msg json as a field. Both send and recv increment the sequence number and recv will only send ack back when the number    matches. 
 - In level 3, we implemented window on the receiver side as an array. The receiver will store it and send the corresponding ack back in order. 
-- In level 4, we added timestamp and retransmitted field to the json message. The program will retransmit messages that had exceeded 1 sec since it was sent. The -         retransmitted field will also be true which will let the receiver side know to send ack for it. 
+- In level 4, we added retransmitted field to the json message and then storing it with a timestamp as a dictionary inside sent_msgs. The program will retransmit         messages that had exceeded 1 sec since it was sent. The retransmitted field will also be true which will let the receiver side know to send ack for it. 
 -In level 5, we made sure that the program will drop a packet if 
   1) Json had trouble loading or invalid
   2) The fields are incorrect 
