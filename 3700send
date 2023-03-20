@@ -8,7 +8,7 @@ class Sender:
 	def __init__(self, host, port):
 		self.host = host
 		self.remote_port = int(port)
-		self.log("Sender starting up using port %s" % self.remote_port)
+		#self.log("Sender starting up using port %s" % self.remote_port)
 		self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.socket.bind(('0.0.0.0', 0))
 		self.waiting = False
@@ -93,7 +93,7 @@ class Sender:
 						# save message with timestamp sent
 						sent_msgs[seq_num] = {"msg": msg, "timestamp": time.monotonic()}
 						
-						self.log("Sending message '%s'" % msg)
+						#self.log("Sending message '%s'" % msg)
 						self.send(msg)
 						# increase seq_num of sent messages
 						seq_num += 1
@@ -115,7 +115,7 @@ class Sender:
 					first_retransmit = sent_msg["msg"]["seq_num"]
 					sent_msg["msg"]["retransmitted"] = True
 					# retransmit
-					self.log("Sending message '%s' AGAIN" % sent_msg["msg"])
+					#self.log("Sending message '%s' AGAIN" % sent_msg["msg"])
 					self.send(sent_msg["msg"])
 					sent_msg["timestamp"] = cur_time
 
