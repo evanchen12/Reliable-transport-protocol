@@ -2,77 +2,132 @@
 
 import argparse, socket, time, json, select, struct, sys, math, zlib
 
-class Receiver:
-	def __init__(self):
+DATA_SIZE = 1375
+
+class Sender:
+	def __init__(self, host, port):
+		self.host = host
+		self.remote_port = int(port)
+		self.log("Sender starting up using port %s" % self.remote_port)
 		self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.socket.bind(('0.0.0.0', 0))
-		self.port = self.socket.getsockname()[1]
-		self.log("Bound to port %d" % self.port)
-
-		self.remote_host = None
-		self.remote_port = None
-
-	def send(self, message):
-		self.socket.sendto(json.dumps(message).encode('utf-8'), (self.remote_host, self.remote_port))
+		self.waiting = False
+		
 
 	def log(self, message):
 		sys.stderr.write(message + "\n")
 		sys.stderr.flush()
 
-	def send_next_ack(self, msg):
-		# Print out the data to stdout
-		print(msg["data"], end='', flush=True)
-
-		# Always send back an ack
-		self.send({ "type": "ack", "seq_num": msg["seq_num"] })
-		self.log("Sending ack '%s'" % msg["seq_num"])
-				
+	def send(self, message):
+		self.socket.sendto(json.dumps(message).encode('utf-8'), (self.host, self.remote_port))
 
 	def run(self):
-		seq_num = 0
-		window = []
-
+		seq_num = 0 # next sequence number to send out
+		sent_msgs = {} # dictionary of dictionaries msg, timestamp
+		next_seq_num = 0 # next sequence number that should be acked
+		rtt = 0.5
+		alpha = 0.8
+		window_size = 1.0
+		ssthresh = 4
+		received_ack = []
+		first_retransmit = 0
+		
 		while True:
-			socks = select.select([self.socket], [], [])[0]
+			sockets = [self.socket, sys.stdin] if not self.waiting else [self.socket]
+			socks = select.select(sockets, [], [], 0.1)[0]
 			for conn in socks:
-				data, addr = conn.recvfrom(65535)
-
-				# Grab the remote host/port if we don't alreadt have it
-				if self.remote_host is None:
-					self.remote_host = addr[0]
-					self.remote_port = addr[1]
-
-				try: # Check if JSON corrupted
-					msg = json.loads(data.decode('utf-8'))
-				except json.decoder.JSONDecodeError:
-					break
-				
-				if not all(key in msg for key in ["type", "data", "seq_num", "timestamp", "retransmitted", "checksum"]):
-					break
-
-				if zlib.crc32(msg["data"].encode('utf-8')) != msg["checksum"]:
-					break							 
-				
-				self.log("Received data message %s" % msg)
-				if msg["seq_num"] < seq_num:
-					if msg["retransmitted"]:
-						self.send({ "type": "ack", "seq_num": msg["seq_num"] })
-						self.log("Sending ack '%s' from retransmission" % msg["seq_num"])
-					break
+				if conn == self.socket:
+					k, addr = conn.recvfrom(65535)
+					now = time.monotonic()
 					
+					try: # Check if JSON corrupted
+						msg = json.loads(k.decode('utf-8'))
+					except json.decoder.JSONDecodeError:
+						break
+
 					
-				window.append(msg)
-				window.sort(key = lambda msg: msg["seq_num"])
-				for msg in window:
-					if msg["seq_num"] == seq_num:
+					if msg["seq_num"] in sent_msgs:
+						received_ack.append(msg["seq_num"])
+
+						#update rtt estimation
+						new_rtt = now - sent_msgs[msg["seq_num"]]["timestamp"]
+						rtt = alpha * rtt + (1 - alpha) * new_rtt
+
+						# delete sent msg for seen ack
+						del sent_msgs[msg["seq_num"]]
+
+						if msg["seq_num"] >= next_seq_num:
+							# Slowstart/congestion avoidance
+							if window_size < ssthresh:
+								window_size += 1.0
+							else:
+								window_size += 1.0 / window_size
+						else:
+							# Reno fast retransmit
+							if received_ack.count(msg["seq_num"]) >= 3:
+								received_ack = [ack for ack in received_ack if ack != msg["seq_num"]]
+								# retransmit
+								sent_msg = sent_msgs[msg["seq_num"]]
+								sent_msg["msg"]["retransmitted"] = True
+								for sent_msg in sent_msgs.values():
+									sent_msg["timestamp"] = time.monotonic()
+								self.send(sent_msg["msg"])
+								window_size = window_size / 2.0
+						# increase sequence number acked
+						next_seq_num += 1
+						first_retransmit = seq_num
+						
+					self.log("Received message '%s'" % msg)
+					self.waiting = False
+						
+				elif conn == sys.stdin and self.waiting == False:
+					data = sys.stdin.read(DATA_SIZE)
+					if len(data) == 0:
+						# if no data left and all acked then finished
+						if len(sent_msgs) == 0:
+							self.log("All done!")
+							sys.exit(0)
+					else:
+						# create message to send
+						msg = { "type": "msg", "data": data, "seq_num": seq_num, "retransmitted": False, "checksum": zlib.crc32(data.encode('utf-8'))}
+						# save message with timestamp sent
+						sent_msgs[seq_num] = {"msg": msg, "timestamp": time.monotonic()}
+						
+						self.log("Sending message '%s'" % msg)
+						self.send(msg)
+						# increase seq_num of sent messages
 						seq_num += 1
-						self.send_next_ack(msg)
-						window.remove(msg)
+						# make sure count of unacked messages sent doesn't exceed window size
+						if seq_num - next_seq_num >= window_size:
+							self.waiting = True
 					
+			# check all sent messages for timestamps and retransmit
+			for sent_msg in sent_msgs.values():
+				# take current time
+				cur_time = time.monotonic()
+				# check if lowest value
+				if sent_msg["msg"]["seq_num"] > first_retransmit:
+					sent_msg["timestamp"] = cur_time
+					continue
+				# check if timestamp difference is over 2 * round trip time
+				if (cur_time - sent_msg["timestamp"]) > 2.0 * rtt:
+					# update lowest seq num retransmitted
+					first_retransmit = sent_msg["msg"]["seq_num"]
+					sent_msg["msg"]["retransmitted"] = True
+					# retransmit
+					self.log("Sending message '%s' AGAIN" % sent_msg["msg"])
+					self.send(sent_msg["msg"])
+					sent_msg["timestamp"] = cur_time
+
+					# Return to slow start
+					ssthresh = window_size / 2.0
+					window_size = ssthresh
 		return
 
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser(description='receive data')
+	parser = argparse.ArgumentParser(description='send data')
+	parser.add_argument('host', type=str, help="Remote host to connect to")
+	parser.add_argument('port', type=int, help="UDP port number to connect to")
 	args = parser.parse_args()
-	sender = Receiver()
+	sender = Sender(args.host, args.port)
 	sender.run()
